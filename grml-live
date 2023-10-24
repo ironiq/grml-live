@@ -43,7 +43,7 @@ $PN - build process script for generating a (grml based) Linux Live-ISO
 
 Usage: $PN [options, see as follows]
 
-   -a <architecture>       architecture; available values: i386 and amd64
+   -a <architecture>       architecture; available values: i386, amd64 + arm64
    -A                      clean build directories before and after running
    -b                      build the ISO without updating the chroot via FAI
    -B                      build the ISO without touching the chroot (skips cleanup)
@@ -221,7 +221,6 @@ bailout() {
 
   # get rid of automatically generated conffiles
   rm -f ${GRML_FAI_CONFIG}/nfsroot.conf
-  rm -f ${GRML_FAI_CONFIG}/make-fai-nfsroot.conf
 
   if [ -n "$CHOWN_USER" ]; then
     log "Setting ownership"
@@ -328,6 +327,7 @@ copy_addon_file() {
   msg="Missing addon file: \"$1\""
   ewarn "$msg" ; eend 1
   log "copy_addon_file: $msg"
+  return 1
 }
 
 # replace placeholders in template files with actual information
@@ -485,6 +485,12 @@ specify it on the command line using the -c option."
 [ -n "$OUTPUT" ] || bailout 1 "Error: \$OUTPUT unset, please set it in $LIVE_CONF or
 specify it on the command line using the -o option."
 
+if [[ "$(dpkg --print-architecture)" != "arm64" ]] && [[ "$ARCH" == "arm64" ]] ; then
+  eerror "Failure: trying to build for arm64, but not running on arm64."
+  eend 1
+  bailout
+fi
+
 # trim characters that are known to cause problems inside $GRML_NAME;
 # for example isolinux does not like '-' inside the directory name
 [ -n "$GRML_NAME" ] && export SHORT_NAME="$(echo $GRML_NAME | tr -d ',./;\- ')"
@@ -493,6 +499,7 @@ specify it on the command line using the -o option."
 [ -n "$GRML_NAME" ]   && export GRML_NAME="$GRML_NAME"
 [ -n "$RELEASENAME" ] && export RELEASENAME="$RELEASENAME"
 # }}}
+
 
 # ZERO_LOGFILE - check for backwards compatibility reasons {{{
 # this was default behaviour until grml-live 0.9.34:
@@ -625,7 +632,7 @@ einfo "Logging actions to logfile $LOGFILE"
 
 # dump config variables into file, for script access {{{
 CONFIGDUMP=$(mktemp)
-set | egrep \
+set | grep -E \
   '^(GRML_NAME|RELEASENAME|DATE|VERSION|SUITE|ARCH|DISTRI_NAME|USERNAME|HOSTNAME|APT_PROXY)=' \
   > ${CONFIGDUMP}
 # }}}
@@ -686,17 +693,25 @@ export SUITE # make sure it's available in FAI scripts
 # architecture (option), otherwise installation of kernel will fail
 if echo $CLASSES | grep -qw I386 ; then
    if ! [[ "$ARCH" == "i386" ]] ; then
-      log    "Error: You specified the I386 class but are trying to build something else (AMD64?)."
-      eerror "Error: You specified the I386 class but are trying to build something else (AMD64?)."
+      log    "Error: You specified the I386 class but are trying to build something else (AMD64/ARM64?)."
+      eerror "Error: You specified the I386 class but are trying to build something else (AMD64/ARM64?)."
       eerror "Tip:   Either invoke grml-live with '-a i386' or adjust the architecture class. Exiting."
       eend 1
       bailout
    fi
 elif echo $CLASSES | grep -qi amd64 ; then
    if ! [[ "$ARCH" == "amd64" ]] ; then
-      log    "Error: You specified the AMD64 class but are trying to build something else (I386?)."
-      eerror "Error: You specified the AMD64 class but are trying to build something else (I386?)."
+      log    "Error: You specified the AMD64 class but are trying to build something else (I386/ARM64?)."
+      eerror "Error: You specified the AMD64 class but are trying to build something else (I386/ARM64?)."
       eerror "Tip:   Either invoke grml-live with '-a amd64' or adjust the architecture class. Exiting."
+      eend 1
+      bailout
+   fi
+elif echo $CLASSES | grep -qi arm64 ; then
+   if ! [[ "$ARCH" == "arm64" ]] ; then
+      log    "Error: You specified the ARM64 class but are trying to build something else (I386/AMD64?)."
+      eerror "Error: You specified the ARM64 class but are trying to build something else (I386/AMD64?)."
+      eerror "Tip:   Either invoke grml-live with '-a arm64' or adjust the architecture class. Exiting."
       eend 1
       bailout
    fi
@@ -712,16 +727,7 @@ if [ -z "$FAI_DEBOOTSTRAP" ] ; then
 fi
 
 if [ -z "$FAI_DEBOOTSTRAP_OPTS" ] ; then
-  FAI_DEBOOTSTRAP_OPTS="--exclude=info,tasksel,tasksel-data --include=aptitude --arch $ARCH --no-merged-usr"
-fi
-
-# create backup of old (not yet automatically generated) config file
-if [ -f "${GRML_FAI_CONFIG}/make-fai-nfsroot.conf" ] ; then
-  if ! grep -q 'This is an automatically generated file by grml-live' "${GRML_FAI_CONFIG}/make-fai-nfsroot.conf" ; then
-    ewarn "Found old ${GRML_FAI_CONFIG}/make-fai-nfsroot.conf - moving to ${GRML_FAI_CONFIG}/make-fai-nfsroot.conf.outdated"
-    mv "${GRML_FAI_CONFIG}/make-fai-nfsroot.conf" "${GRML_FAI_CONFIG}/make-fai-nfsroot.conf.outdated"
-    eend $?
-  fi
+  FAI_DEBOOTSTRAP_OPTS="--exclude=info,tasksel,tasksel-data,isc-dhcp-client,isc-dhcp-common --include=aptitude --arch $ARCH"
 fi
 
 echo "# This is an automatically generated file by grml-live.
@@ -729,8 +735,6 @@ echo "# This is an automatically generated file by grml-live.
 FAI_DEBOOTSTRAP=\"$FAI_DEBOOTSTRAP\"
 FAI_DEBOOTSTRAP_OPTS=\"$FAI_DEBOOTSTRAP_OPTS\"
 # EOF " > "${GRML_FAI_CONFIG}/nfsroot.conf"
-# support FAI <=3.4.8, versions >=4.0 use nfsroot.conf
-( cd ${GRML_FAI_CONFIG} && ln -sf nfsroot.conf make-fai-nfsroot.conf )
 # }}}
 
 # CHROOT_OUTPUT - execute FAI {{{
@@ -808,7 +812,13 @@ else
          grep 'Unable to write mmap - msync (28 No space left on device)' $CHECKLOG/software.log >> $LOGFILE && ERROR=5
       fi
 
+      # FAI versions <6.0 used to write to shell.log
       if [ -r "$CHECKLOG/shell.log" ] ; then
+         grep 'FAILED with exit code' $CHECKLOG/shell.log >> $LOGFILE && ERROR=6
+      fi
+
+      # FAI versions >=6.0 always writes to scripts.log
+      if [ -r "$CHECKLOG/scripts.log" ] ; then
          grep 'FAILED with exit code' $CHECKLOG/shell.log >> $LOGFILE && ERROR=6
       fi
 
@@ -911,11 +921,26 @@ fi
 
 # grub boot {{{
 grub_setup() {
-  BOOTX64="/boot/bootx64.efi"
-  BOOTX32="/boot/bootia32.efi"
   EFI_IMG="/boot/efi.img"
 
-  if [[ "$ARCH" == "amd64" ]] ; then
+  local efi_size
+  if [[ "${SECURE_BOOT:-}" == "disable" ]] || [[ "${ARCH:-}" == "i386" ]] ; then
+    efi_size='4M'
+  else
+    # e.g. templates/EFI/debian for Secure Boot has >4MB and needs more space
+    efi_size='8M'
+  fi
+
+  if [[ "$ARCH" == "amd64" ]] || [[ "$ARCH" == "arm64" ]] ; then
+    case "$ARCH" in
+      arm64)
+        BOOTX64="/boot/bootaa64.efi"
+        ;;
+      amd64)
+        BOOTX64="/boot/bootx64.efi"
+        ;;
+    esac
+
     # important: this depends on execution of ${GRML_FAI_CONFIG}/config/scripts/GRMLBASE/45-grub-images
     if ! [ -r "${CHROOT_OUTPUT}/${BOOTX64}" ] ; then
       log    "Can not access GRUB efi image ${CHROOT_OUTPUT}/${BOOTX64}, required for Secure Boot support"
@@ -925,7 +950,7 @@ grub_setup() {
       bailout 50
     fi
 
-    dd if=/dev/zero of="${CHROOT_OUTPUT}/${EFI_IMG}" bs=4M count=1 2>/dev/null || bailout 50
+    dd if=/dev/zero of="${CHROOT_OUTPUT}/${EFI_IMG}" bs="${efi_size}" count=1 2>/dev/null || bailout 50
     mkfs.vfat -n GRML "${CHROOT_OUTPUT}/${EFI_IMG}" >/dev/null || bailout 51
     mmd -i "${CHROOT_OUTPUT}/${EFI_IMG}" ::EFI || bailout 52
     mmd -i "${CHROOT_OUTPUT}/${EFI_IMG}" ::EFI/BOOT || bailout 52
@@ -934,8 +959,15 @@ grub_setup() {
       log   "Secure Boot is disabled."
       einfo "Secure Boot is disabled." ; eend 0
 
-      # install "$BOOTX64" as ::EFI/BOOT/bootx64.efi inside image file "$EFI_IMG":
-      mcopy -i "${CHROOT_OUTPUT}/${EFI_IMG}" "${CHROOT_OUTPUT}/${BOOTX64}" ::EFI/BOOT/bootx64.efi >/dev/null || bailout 53
+      # install "$BOOTX64" as ::EFI/BOOT/{bootx64.efi|bootaa64.efi} inside image file "$EFI_IMG":
+      case "$ARCH" in
+        arm64)
+          mcopy -i "${CHROOT_OUTPUT}/${EFI_IMG}" "${CHROOT_OUTPUT}/${BOOTX64}" ::EFI/BOOT/bootaa64.efi >/dev/null || bailout 53
+          ;;
+        amd64)
+          mcopy -i "${CHROOT_OUTPUT}/${EFI_IMG}" "${CHROOT_OUTPUT}/${BOOTX64}" ::EFI/BOOT/bootx64.efi >/dev/null || bailout 53
+          ;;
+      esac
 
       log   "Generated 64-bit EFI image $BOOTX64"
       einfo "Generated 64-bit EFI image $BOOTX64" ; eend 0
@@ -996,6 +1028,7 @@ grub_setup() {
   fi
 
   if [[ "$ARCH" == "i386" ]] ; then
+    BOOTX32="/boot/bootia32.efi"
     if ! [ -r "${CHROOT_OUTPUT}/${BOOTX32}" ] ; then
       log    "Can not access GRUB efi image ${CHROOT_OUTPUT}/${BOOTX32}."
       eerror "Can not access GRUB efi image ${CHROOT_OUTPUT}/${BOOTX32}." ; eend 1
@@ -1004,7 +1037,7 @@ grub_setup() {
       bailout 50
     fi
 
-    dd if=/dev/zero of="${CHROOT_OUTPUT}/${EFI_IMG}" bs=4M count=1 2>/dev/null || bailout 50
+    dd if=/dev/zero of="${CHROOT_OUTPUT}/${EFI_IMG}" bs="${efi_size}" count=1 2>/dev/null || bailout 50
     mkfs.vfat -n GRML "${CHROOT_OUTPUT}/${EFI_IMG}" >/dev/null || bailout 51
     mmd -i "${CHROOT_OUTPUT}/${EFI_IMG}" ::EFI || bailout 52
     mmd -i "${CHROOT_OUTPUT}/${EFI_IMG}" ::EFI/BOOT || bailout 52
@@ -1020,7 +1053,7 @@ grub_setup() {
 mkdir -p "$BUILD_OUTPUT" || bailout 6 "Problem with creating $BUILD_OUTPUT for stage ARCH"
 
 # prepare ISO
-if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] ; then
+if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] || [ "$ARCH" = arm64 ] ; then
   if [ -n "$BOOTSTRAP_ONLY" ] ; then
     log   "Skipping stage 'boot' as building with bootstrap only."
     ewarn "Skipping stage 'boot' as building with bootstrap only." ; eend 0
@@ -1090,9 +1123,17 @@ if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] ; then
     grub_setup
 
     # EFI boot files
-    if [ -r "${CHROOT_OUTPUT}/boot/efi.img" -a -r "${CHROOT_OUTPUT}/boot/bootx64.efi" ] ; then
-      einfo "Copying 64-bit EFI boot files into ISO path."
-      log   "Copying 64-bit EFI boot files into ISO path."
+    if [ -r "${CHROOT_OUTPUT}/boot/efi.img" -a -r "${CHROOT_OUTPUT}/boot/bootaa64.efi" ] ; then
+      einfo "Copying 64-bit EFI boot files (arm64) into ISO path."
+      log   "Copying 64-bit EFI boot files (arm64) into ISO path."
+      RC=$0
+      cp "${CHROOT_OUTPUT}/boot/efi.img" "${BUILD_OUTPUT}/boot/" || RC=$?
+      mkdir -p "${BUILD_OUTPUT}/EFI/BOOT/" || RC=$?
+      cp "${CHROOT_OUTPUT}/boot/bootaa64.efi" "${BUILD_OUTPUT}/EFI/BOOT/bootaa64.efi" || RC=$?
+      eend $?
+    elif [ -r "${CHROOT_OUTPUT}/boot/efi.img" -a -r "${CHROOT_OUTPUT}/boot/bootx64.efi" ] ; then
+      einfo "Copying 64-bit EFI boot files (amd64) into ISO path."
+      log   "Copying 64-bit EFI boot files (amd64) into ISO path."
       RC=$0
       cp "${CHROOT_OUTPUT}/boot/efi.img" "${BUILD_OUTPUT}/boot/" || RC=$?
       mkdir -p "${BUILD_OUTPUT}/EFI/BOOT/" || RC=$?
@@ -1100,7 +1141,7 @@ if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] ; then
       eend $?
     elif [ -r "${CHROOT_OUTPUT}/boot/efi.img" -a -r "${CHROOT_OUTPUT}/boot/bootia32.efi" ] ; then
       einfo "Copying 32-bit EFI boot files into ISO path."
-      log "Copying 32-bit EFI boot files into ISO path."
+      log   "Copying 32-bit EFI boot files into ISO path."
       RC=$0
       cp "${CHROOT_OUTPUT}/boot/efi.img" "${BUILD_OUTPUT}/boot/" || RC=$?
       mkdir -p "${BUILD_OUTPUT}/EFI/BOOT/" || RC=$?
@@ -1152,7 +1193,39 @@ if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] ; then
         copy_addon_file ipxe.lkrn /usr/lib/ipxe addons
         copy_addon_file ipxe.efi /usr/lib/ipxe addons
         copy_addon_file pci.ids /usr/share/misc addons
-        copy_addon_file memtest86+.bin /boot addons
+
+        # memtest86+ >=6.00-1
+        if [[ "$ARCH" == "amd64" ]] ; then
+          copy_addon_file memtest86+x64.efi /boot addons
+        elif [[ "$ARCH" == "i386" ]] ; then
+          copy_addon_file memtest86+ia32.efi /boot addons
+        fi
+
+        # provide memtest86+ >=6.00-1 files as "memtest" file
+        # for BIOS boot in isolinux/syslinux
+        if ! [ -r "${BUILD_OUTPUT}/boot/addons/memtest" ] ; then
+          if [[ "$ARCH" == "amd64" ]] ; then
+            copy_addon_file memtest86+x64.bin /boot addons &&
+            # make memtest filename FAT16/8.3 compatible
+            mv "${BUILD_OUTPUT}/boot/addons/memtest86+x64.bin" \
+               "${BUILD_OUTPUT}/boot/addons/memtest"
+          elif [[ "$ARCH" == "i386" ]] ; then
+            copy_addon_file memtest86+ia32.bin /boot addons &&
+            # make memtest filename FAT16/8.3 compatible
+            mv "${BUILD_OUTPUT}/boot/addons/memtest86+ia32.bin" \
+               "${BUILD_OUTPUT}/boot/addons/memtest"
+          fi
+        fi
+
+        # fallback: if we still don't have /boot/addons/memtest available, we
+        # might have an older memtest86+ version (<=5.01-3.1) which ships
+        # file "memtest86+.bin" instead
+        if ! [ -r "${BUILD_OUTPUT}/boot/addons/memtest" ] ; then
+          copy_addon_file memtest86+.bin /boot addons &&
+          # make memtest filename FAT16/8.3 compatible
+          mv "${BUILD_OUTPUT}/boot/addons/memtest86+.bin" \
+             "${BUILD_OUTPUT}/boot/addons/memtest"
+        fi
 
         # since syslinux(-common) v3:6.03~pre1+dfsg-4 the files are in a
         # different directory :(
@@ -1167,16 +1240,12 @@ if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] ; then
 
         copy_addon_file memdisk /usr/lib/syslinux addons
 
-        eend 0
-
-        # make memtest filename FAT16/8.3 compatible
-        mv "${BUILD_OUTPUT}/boot/addons/memtest86+.bin" \
-          "${BUILD_OUTPUT}/boot/addons/memtest"
-
         # copy only files so we can handle bsd4grml on its own
         for file in ${TEMPLATE_DIRECTORY}/boot/addons/* ; do
           test -f $file && cp $file "$BUILD_OUTPUT"/boot/addons/
         done
+
+        eend 0
 
         if [ -n "$NO_ADDONS_BSD4GRML" ] ; then
           log   "Skipping installation of bsd4grml as requested via \$NO_ADDONS_BSD4GRML."
@@ -1206,22 +1275,34 @@ if [ "$ARCH" = i386 ] || [ "$ARCH" = amd64 ] ; then
     fi
     echo "source /boot/grub/footer.cfg" >> "${BUILD_OUTPUT}"/boot/grub/loopback.cfg
 
-    # copy grub files from target
-    mkdir -p "${BUILD_OUTPUT}"/boot/grub/i386-pc/
-    cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/*-pc/*.mod "${BUILD_OUTPUT}"/boot/grub/i386-pc/
-    cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/*-pc/*.o "${BUILD_OUTPUT}"/boot/grub/i386-pc/
-    cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/*-pc/*.lst "${BUILD_OUTPUT}"/boot/grub/i386-pc/
-    cp -a "${CHROOT_OUTPUT}"/usr/share/grub/ascii.pf2 "${BUILD_OUTPUT}"/boot/grub/
-    cp -a "${CHROOT_OUTPUT}"/boot/grub/core.img "${BUILD_OUTPUT}"/boot/grub/
-    cp -a "${CHROOT_OUTPUT}"/boot/grub/grub.img "${BUILD_OUTPUT}"/boot/grub/
+    # copy modules for GRUB
+    if [ "${ARCH}" = "arm64" ] ; then
+      mkdir -p "${BUILD_OUTPUT}"/boot/grub/arm64-efi/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/arm64-efi/*.mod "${BUILD_OUTPUT}"/boot/grub/arm64-efi/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/arm64-efi/*.lst "${BUILD_OUTPUT}"/boot/grub/arm64-efi/
+      # NOTE: usage of /boot/grub/core.img + /boot/grub/grub.img unclear yet
+    elif [ "${ARCH}" = "amd64" ] || [ "${ARCH}" = "i386" ] ; then
+      # grub-pc-bin
+      mkdir -p "${BUILD_OUTPUT}"/boot/grub/i386-pc/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/*-pc/*.mod  "${BUILD_OUTPUT}"/boot/grub/i386-pc/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/*-pc/*.o    "${BUILD_OUTPUT}"/boot/grub/i386-pc/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/*-pc/*.lst  "${BUILD_OUTPUT}"/boot/grub/i386-pc/
 
-    # copy modules for UEFI grub, 64-bit
-    mkdir -p "${BUILD_OUTPUT}"/boot/grub/x86_64-efi/
-    cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/x86_64-efi/*.{mod,lst} "${BUILD_OUTPUT}"/boot/grub/x86_64-efi/
+      # grub-efi-amd64-bin
+      mkdir -p "${BUILD_OUTPUT}"/boot/grub/x86_64-efi/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/x86_64-efi/*.{mod,lst} "${BUILD_OUTPUT}"/boot/grub/x86_64-efi/
 
-    # copy modules for UEFI grub, 32-bit
-    mkdir -p "${BUILD_OUTPUT}"/boot/grub/i386-efi/
-    cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/i386-efi/*.{mod,lst} "${BUILD_OUTPUT}"/boot/grub/i386-efi/
+      # grub-efi-ia32-bin
+      mkdir -p "${BUILD_OUTPUT}"/boot/grub/i386-efi/
+      cp -a "${CHROOT_OUTPUT}"/usr/lib/grub/i386-efi/*.{mod,lst} "${BUILD_OUTPUT}"/boot/grub/i386-efi/
+
+      cp -a "${CHROOT_OUTPUT}"/boot/grub/core.img       "${BUILD_OUTPUT}"/boot/grub/
+      cp -a "${CHROOT_OUTPUT}"/boot/grub/grub.img       "${BUILD_OUTPUT}"/boot/grub/
+    fi
+
+    # arch independent files
+    cp -a "${CHROOT_OUTPUT}"/usr/share/grub/ascii.pf2     "${BUILD_OUTPUT}"/boot/grub/
+    cp -a "${CHROOT_OUTPUT}"/usr/share/grub/unicode.pf2   "${BUILD_OUTPUT}"/boot/grub/  # clarify
 
     if ! [ -d "${TEMPLATE_DIRECTORY}"/GRML ] ; then
       log    "Error: ${TEMPLATE_DIRECTORY}/GRML does not exist. Exiting."

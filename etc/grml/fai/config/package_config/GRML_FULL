@@ -3,17 +3,16 @@ PACKAGES install
 grml-live
 grml-paste
 grml-quickconfig-standard
-grml-terminalserver
 
 # base os
 apt
 aptitude
 binfmt-support
-bsdmainutils
+bsdextrautils
+bsdutils
 dctrl-tools
 devscripts
 dos2unix
-dstat
 findutils
 htop
 libnss-myhostname
@@ -36,12 +35,10 @@ tzdata
 util-linux
 
 # basic accessibility
-brltty
-espeakup
 alsa-utils
-
-# broken userland debugging
-ltrace
+brltty
+espeak-ng
+espeakup
 
 # deploy on remote sites
 openvpn
@@ -50,11 +47,11 @@ pppoeconf
 
 # disk subsystems support/debugging
 array-info
-cciss-vol-status
 cryptsetup
 disktype
 dmraid
 dmsetup
+f3
 fai-setup-storage
 fio
 gdisk
@@ -74,7 +71,6 @@ stenc
 # disk partitioning/boot
 boot-info-script
 gparted
-grub-pc-bin
 kpartx
 mbr
 partclone
@@ -161,6 +157,8 @@ dnsutils
 ethstatus
 ethtool
 hostapd
+hping3
+ifenslave
 iftop
 ifupdown
 ipcalc
@@ -169,10 +167,10 @@ iperf3
 ipmitool
 iproute2
 iptraf-ng
+iptstate
 iputils-arping
 iputils-ping
 iputils-tracepath
-isc-dhcp-client
 iw
 libnss-mdns
 libteam-utils
@@ -200,14 +198,12 @@ tcpdump
 tcptraceroute
 telnet
 tmate
-tshark
 tsocks
 uml-utilities
 usb-modeswitch
 vlan
 wireguard
 wireless-regdb
-wireshark
 
 # network transfers
 ca-certificates
@@ -235,8 +231,6 @@ pwgen
 
 # popular VCS to pull config from
 git
-mercurial
-subversion
 
 # recovery
 afflib-tools
@@ -258,9 +252,11 @@ dirvish
 dump
 duplicity
 fsarchiver
+mtx
 restic
 
 # compressions for backup/restore
+lz4
 lzop
 zstd
 
@@ -290,12 +286,9 @@ zsh
 
 # system info/mgmt
 augeas-tools
-facter
 flashrom
 inxi
-mcollective
 memtester
-puppet
 stressant
 
 # virtualization support
@@ -317,7 +310,7 @@ w3m
 wget
 
 # X
-openbox obconf
+fluxbox
 grml-desktop
 grml-x
 x11vnc
@@ -335,13 +328,16 @@ xterm
 # x86 hardware support
 acpi
 acpi-support
-cmospwd
-cpuid
 irqbalance
 lm-sensors
 lshw
 numactl
 usbview
+
+# firmware updates
+fwupd
+policykit-1
+udisks2
 
 # testing
 bats
@@ -350,14 +346,58 @@ stress
 # docs
 man-db
 
+# special terminal output
+lolcat
+toilet
+
 PACKAGES install I386
+# kernel related
 linux-image-686
 linux-cpupower
+# disk subsystems support/debugging, I386/AMD64 specific
+cciss-vol-status
+# x86 hardware support
+cmospwd
+cpuid
+# broken userland debugging
+ltrace
+# disk partitioning/boot
+grub-pc-bin
+
+# PXE boot
+grml-terminalserver
+
+# firmware updates
+fwupd-i386-signed
 
 PACKAGES install AMD64
+# kernel related
 linux-image-amd64
 linux-cpupower
+# disk subsystems support/debugging
+cciss-vol-status
+# x86 hardware support
+cmospwd
+cpuid
+# broken userland debugging
+ltrace
+# disk partitioning/boot
+grub-pc-bin
+
+# PXE boot
+grml-terminalserver
 
 # EFI PXE boot support in grml-terminalserver
 grub-efi-amd64-signed
 shim-signed
+
+# firmware updates
+fwupd-amd64-signed
+
+PACKAGES install ARM64
+# kernel related
+linux-image-arm64
+linux-cpupower
+
+# firmware updates
+fwupd-arm64-signed

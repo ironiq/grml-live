@@ -8,9 +8,9 @@ Build-Depends-Indep:
  asciidoc,
  docbook-xsl,
  xsltproc,
-Standards-Version: 4.5.1
+Standards-Version: 4.6.2
 Homepage: https://grml.org/grml-live/
-Vcs-git: git://git.grml.org/grml-live.git
+Vcs-git: https://github.com/grml/grml-live.git
 Vcs-Browser: https://git.grml.org/?p=grml-live.git
 Origin: Grml
 Bugs: mailto:bugs@grml.org
@@ -20,19 +20,18 @@ Architecture: all
 Depends:
  bc,
  bzip2,
+ debootstrap,
  dosfstools,
  fai-client (>= 3.4.0),
- fai-server (>= 3.4.0),
  isolinux (>= 3:6.03+dfsg-5+deb8u1~),
  jo,
- memtest86+,
  mksh,
  moreutils,
  mtools,
  pciutils,
  rsync,
  squashfs-tools (>= 1:4.2-0~bpo60),
- syslinux,
+ syslinux | syslinux-efi,
  xorriso,
  ${misc:Depends},
 Recommends:
@@ -40,6 +39,7 @@ Recommends:
  grub-pc-bin,
  imagemagick,
  ipxe,
+ memtest86+,
  syslinux-utils,
 Suggests:
  fai-doc,

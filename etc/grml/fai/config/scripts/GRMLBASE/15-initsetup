@@ -16,57 +16,14 @@ systemd_setup() {
   echo "Enabling user '$USERNAME' for autologin"
   sed -i "s/\$USERNAME/$USERNAME/" "$target"/etc/systemd/system/getty@tty*.service.d/override.conf
 
-  case "$(cat "${target}"/etc/debian_version)" in
-    8.*)
-      echo "Debian jessie detected. Enabling workaround for unknown systemctl preset-all/set-default exit failure."
-      $ROOTCMD systemctl preset-all || true
-      $ROOTCMD systemctl set-default grml-boot.target || true
-      ;;
-    *)
-      # workaround for #992847 to workaround /lib/systemd -> /usr/lib/systemd transition
-      $ROOTCMD rm -f /etc/systemd/system/syslog.service
+  # workaround for #992847 to workaround /lib/systemd -> /usr/lib/systemd transition
+  $ROOTCMD rm -f /etc/systemd/system/syslog.service
 
-      $ROOTCMD systemctl preset-all
-      $ROOTCMD systemctl set-default grml-boot.target
-      ;;
-  esac
+  $ROOTCMD systemctl preset-all
+  $ROOTCMD systemctl set-default grml-boot.target
 }
 
-file_rc_setup() {
-  if ! [ -r "${target}"/etc/runlevel.conf ] ; then
-     echo 'Warning: /etc/runlevel.conf does not exist...'
-     echo '... assuming we do not have file-rc, skipping 15-initsetup'
-     exit 0
-  fi
-
-  # keep a backup of the original runlevel.conf file for reference
-  if [ -r "${target}"/etc/runlevel.conf.original ] ; then
-    # make sure to store old backup files if they differ as well
-    if ! cmp "${target}"/etc/runlevel.conf "${target}"/etc/runlevel.conf.original >/dev/null ; then
-      cp "${target}"/etc/runlevel.conf.original "${target}/etc/runlevel.conf.original.$(date +%Y%m%d_%k:%M:%S)"
-    fi
-  fi
-
-  cp "${target}"/etc/runlevel.conf "${target}"/etc/runlevel.conf.original
-
-  # provide Grml's default file-rc configuration
-  fcopy -v /etc/runlevel.conf
-
-  # provide Grml's inittab configuration
-  fcopy -v /etc/inittab
-  sed -i "s/\$USERNAME\$/${USERNAME}/" "${target}"/etc/inittab
-
-  # provide Grml's bootlocal init scripts
-  fcopy -v -mroot,root,0755 /etc/init.d/bootlocal.first
-  fcopy -v -mroot,root,0755 /etc/init.d/bootlocal.middle
-  fcopy -v -mroot,root,0755 /etc/init.d/bootlocal.last
-}
-
-if ifclass FILE_RC ; then
-  file_rc_setup
-else
-  systemd_setup
-fi
+systemd_setup
 
 ## END OF FILE #################################################################
 # vim:ft=sh expandtab ai tw=80 tabstop=4 shiftwidth=2
